@@ -13,6 +13,7 @@ export default defineConfig({
       {
         text: '文章归档',
         items: [
+          { text: '5月第3周：科技领涨', link: '/posts/2026-w20' },
           { text: '示例文章', link: '/posts/sample' },
         ],
       },
