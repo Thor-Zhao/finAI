@@ -15,20 +15,16 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.1,
       "position": [250, 300],
-      "id": "cron-trigger",
       "name": "Weekly Mon/Thu 9AM"
     },
     {
       "parameters": {
-        "command": "/bin/bash /home/thor/finAI-website/auto-publish.sh",
-        "options": {}
+        "jsCode": "const { execSync } = require('child_process');\nconst output = execSync('python3 /home/thor/finAI-website/auto-publish.py', { timeout: 300000, cwd: '/home/thor/finAI-website' });\nreturn [{ json: { stdout: output.toString() } }];"
       },
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [500, 300],
-      "id": "exec-script",
-      "name": "Generate & Publish",
-      "credentials": {}
+      "name": "Generate & Publish"
     }
   ],
   "connections": {
