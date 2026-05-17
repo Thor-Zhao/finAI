@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """FinTech AI Weekly - auto generate & publish"""
 
-import subprocess, re, os, glob
+import subprocess, re, os, glob, sys
 from datetime import datetime
 
 REPO_DIR = "/home/thor/finAI-website"
 POST_DIR = os.path.join(REPO_DIR, "docs/posts")
-GIT_TOKEN = open("/home/thor/.hermes/.env").read()
-match = re.search(r"GITHUB_TOKEN=(.+)", GIT_TOKEN)
-TOKEN = match.group(1).strip() if match else ""
 
 WEEK = datetime.now().strftime("%V")
 DATE = datetime.now().strftime("%Y-%m-%d")
@@ -24,74 +21,57 @@ TOPICS = [
 ]
 TOPIC = TOPICS[(int(WEEK)) % len(TOPICS)]
 
-print(f"[{DATE}] W{WEEK} topic: {TOPIC}")
+print(f"[{DATE}] W{WEEK} - {TOPIC}")
 
-# 调用 Hermes CLI
-result = subprocess.run(
-    ["hermes", "-p", "yuanjian", "chat", "-q", f"""
-写一篇关于【{TOPIC}】的金融科技AI行业追踪文章（中文，800-1200字，Markdown格式）。
+# 1. 生成文章 - 用 yuanjian profile
+prompt = f"""写一篇关于【{TOPIC}】的金融科技AI行业追踪文章。
 
 要求：
-- 带YAML frontmatter（title, date, tags）
-- title格式：FinTech AI Weekly - W{WEEK} - {TOPIC}
-- 有具体案例或数据支撑
-- 面向金融从业者，专业但不晦涩
+- 中文Markdown格式
+- 第一行必须是 ---
+- 带YAML frontmatter: title, date, tags
+- title: FinTech AI Weekly W{WEEK} - {TOPIC}
+- tags: [fintech, ai, banking]
+- 800-1200字，有具体案例或数据
 - 不谈个股推荐或投资建议
-- 标签用英文，如 [fintech, ai, banking]
-- Markdown正文用中文
-"""],
+- 正文先写文章内容，不要聊天性质的文字"""
+
+result = subprocess.run(
+    ["hermes", "-p", "yuanjian", "chat", "-q", prompt],
     capture_output=True, text=True, timeout=300, cwd=REPO_DIR
 )
+raw = result.stdout
 
-output = result.stdout
-# 提取方框内正文
-lines = output.split("\n")
-article_lines = []
-in_box = False
-for line in lines:
-    if "╭─" in line or "╰─" in line:
-        continue
-    if in_box:
-        article_lines.append(line)
-    if "────────────────────────────────────────" in line:
-        continue
+# 2. 解析输出 - 查找第一个 --- 开头到末尾的内容
+body = ""
+for line in raw.split("\n"):
+    if line.strip().startswith("---"):
+        # 找到 frontmatter 开始
+        idx = raw.index(line)
+        body = raw[idx:]
+        break
 
-# Fallback: 提取 Query 之后、第一次出现中文开始
-if not article_lines:
-    start = False
-    for line in lines:
-        if "Query:" in line:
-            start = True
-            continue
-        if start and line.strip() and not line.startswith("Init"):
-            article_lines.append(line)
+if not body:
+    # fallback: 取最后一个 ╰─ 框内的内容
+    parts = re.split(r"[╰╯╭╮╴╵╶╷─│╎┆┊]", raw)
+    for p in reversed(parts):
+        p = p.strip()
+        if len(p) > 100 and ("#" in p or "---" in p):
+            body = p
+            break
 
-body = "\n".join(article_lines).strip()
+if not body or len(body) < 100:
+    print(f"ERROR: failed to extract article, raw length={len(raw)}")
+    print("RAW PREVIEW:", raw[:200])
+    sys.exit(1)
 
-# 如果 body 没内容，尝试另一种方式
-if not body or len(body) < 50:
-    text = output.strip()
-    # 取 Initializing agent... 之后的内容
-    idx = text.find("Initializing agent")
-    if idx > 0:
-        text = text[idx + 20:]
-    # 去掉 box 装饰
-    text = re.sub(r"[╭─╰─╮│╯╮╭]", "", text).strip()
-    body = text
-
-# 写入文件
-slug = f"fintech-ai-w{WEEK}"
-filepath = os.path.join(POST_DIR, f"{slug}.md")
+# 3. 写入
+filepath = os.path.join(POST_DIR, f"fintech-ai-w{WEEK}.md")
 with open(filepath, "w") as f:
-    f.write(body)
+    f.write(body.strip())
 print(f"Written: {filepath} ({len(body)} chars)")
 
-# 验证 frontmatter
-first_line = body.strip().split("\n")[0] if body.strip() else ""
-if first_line != "---":
-    print(f"WARN: article may not have frontmatter, first line: {first_line[:30]}")
-
-# 更新索引
+# 4. 更新索引
 index_lines = ["# 文章列表", ""]
 for f in sorted(glob.glob(os.path.join(POST_DIR, "*.md")), reverse=True):
     name = os.path.basename(f).replace(".md", "")
@@ -104,26 +84,36 @@ for f in sorted(glob.glob(os.path.join(POST_DIR, "*.md")), reverse=True):
             if m:
                 title = m.group(1)
                 break
-    link_text = title or name
-    index_lines.append(f"- [{link_text}](./{name})")
+    index_lines.append(f"- [{title or name}](./{name})")
 with open(os.path.join(POST_DIR, "index.md"), "w") as f:
     f.write("\n".join(index_lines))
+print("Index updated")
 
-# git push with retry
+# 5. Git commit + push (with timeout, non-blocking)
 os.chdir(REPO_DIR)
-subprocess.run(["git", "add", "-A"], capture_output=True)
-subprocess.run(["git", "commit", "-m", f"auto: fintech ai weekly w{WEEK} [{DATE}]"], capture_output=True)
+subprocess.run(["git", "add", "-A"], capture_output=True, timeout=30)
+subprocess.run(["git", "commit", "-m", f"auto: fintech ai w{WEEK} [{DATE}]"], capture_output=True, timeout=30)
 
-for attempt in range(3):
-    r = subprocess.run(
-        ["git", "push", f"https://Thor-Zhao:{TOKEN}@github.com/Thor-Zhao/finAI.git", "main"],
-        capture_output=True, text=True, timeout=60
-    )
-    if r.returncode == 0:
-        print(f"Pushed successfully (attempt {attempt+1})")
-        break
-    print(f"Push failed (attempt {attempt+1}): {r.stderr[:80]}")
-else:
-    print("Push failed after 3 attempts - commit is local, retry later with 'git push'")
+# 6. Push with longer timeout and retry
+try:
+    token = ""
+    env = open("/home/thor/.hermes/.env").read()
+    m = re.search(r"GITHUB_TOKEN=(.+)", env)
+    token = m.group(1).strip() if m else ""
 
-print(f"DONE: W{WEEK} - {TOPIC}")
+    for i in range(4):
+        r = subprocess.run(
+            ["git", "push", f"https://Thor-Zhao:{token}@github.com/Thor-Zhao/finAI.git", "main"],
+            capture_output=True, text=True, timeout=(i+1)*60
+        )
+        if r.returncode == 0:
+            print(f"Pushed OK (attempt {i+1})")
+            break
+        print(f"Push #{i+1}: timeout or error")
+    else:
+        print("Push failed after 4 attempts - commit is local, run 'cd ~/finAI-website && git push' later")
+except Exception as e:
+    print(f"Push error (non-fatal): {e}")
+    print("Commit is local, push when network is good")
+
+print(f"DONE: W{WEEK}")
