@@ -1,6 +1,6 @@
 # 文章列表
 
-- [fintech-ai-w27](./fintech-ai-w27)
+- [FinTech AI Weekly W27 - 保险科技：AI理赔自动化](./fintech-ai-w27)
 - [fintech-ai-w26](./fintech-ai-w26)
 - [fintech-ai-w25](./fintech-ai-w25)
 - [fintech-ai-w24](./fintech-ai-w24)
